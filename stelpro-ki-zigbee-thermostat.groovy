@@ -26,9 +26,10 @@ metadata {
 	definition (name: "Stelpro Ki ZigBee Thermostat", namespace: "PhilC", author: "PhilC") {
         capability "Configuration"
         capability "TemperatureMeasurement"
+        capability "Thermostat"
         capability "ThermostatHeatingSetpoint"
-        capability "ThermostatMode"
-        capability "ThermostatOperatingState"
+        capability "ThermostatCoolingSetpoint"
+        capability "ThermostatSetpoint"
         capability "Refresh"
         
         command "eco"
@@ -74,16 +75,17 @@ def parse(String description) {
 			map.name = "heatingSetpoint"
 			map.value = getTemperature(descMap.value)
             if (descMap.value == "8000") {		//0x8000
-                map.value = "--"
+                map.value = getTemperature("01F4")  // 5 Celsius (minimum setpoint)
             }
             sendEvent(name:"heatingSetpoint", value:map.value)
+            sendEvent(name:"thermostatSetpoint", value:map.value)
 		}
         else if (descMap.cluster == "0201" && descMap.attrId == "001C") {
             logDebug "MODE"
             if (descMap.value != "04") {
                 map.name = "thermostatMode"
                 map.value = getModeMap()[descMap.value]
-                sendEvent(name:"thermostatMode", value:map.value)          
+                sendEvent(name:"thermostatMode", value:map.value) 
             }
             else {
                 logDebug "descMap.value == \"04\". Ignore and wait for SETPOINT MODE"
@@ -112,6 +114,25 @@ def parse(String description) {
             	map.value = "heating"
             }
             sendEvent(name:"thermostatOperatingState", value:map.value)
+        }
+        else if (descMap.cluster == "0204" & descMap.attrId == "0000") {
+        	logDebug "TEMPERATURE DISPLAY MODE"
+            map.name = "temperatureScale"
+            if (descMap.value == "00") {		//Celsius
+                map.value = "C"
+            }
+            else if (descMap.value == "01") {	//Fahrenheit
+                map.value = "F"
+            }
+            
+            if (getTemperatureScale() != map.Value){
+                // The temperature scale changed. Adjust the dummy cooling setpoint to the right scale
+                sendEvent(name: "coolingSetpoint", value:getTemperature("0BB8")) // 0x0BB8 =  30 Celsius
+            }            
+            
+            updateDataValue("temperatureScale", map.value)
+            // Don't create an event -> reset the map to null
+            map = null
         }
 	}
 
@@ -153,6 +174,11 @@ def configure(){
     runIn(1800,logsOff)    
 	logDebug "binding to Thermostat cluster"
     
+    // Set unused default values (for Google Home Integration)
+    sendEvent(name: "coolingSetpoint", value:getTemperature("0BB8")) // 0x0BB8 =  30 Celsius
+    sendEvent(name: "thermostatFanMode", value:"auto")
+    updateDataValue("lastRunningMode", "heat") // heat is the only compatible mode for this device
+    
     def cmds = [
     //bindings
         "zdo bind 0x${device.deviceNetworkId} 1 0x019 0x201 {${device.zigbeeId}} {}", "delay 200"
@@ -177,14 +203,9 @@ def getModeMap() { [
 	"05":"eco"
 ]}
 
-def getFanModeMap() { [
-	"04":"fanOn",
-	"05":"fanAuto"
-]}
-
 def getTemperature(value) {
 	if (value != null) {
-    	logDebug("value $value")
+    	logDebug("getTemperature: value $value")
 		def celsius = Integer.parseInt(value, 16) / 100
 		if (getTemperatureScale() == "C") {
 			return celsius
@@ -193,6 +214,10 @@ def getTemperature(value) {
 			return Math.round(celsiusToFahrenheit(celsius))
 		}
 	}
+}
+
+def getTemperatureScale() {
+    return getDataValue("temperatureScale")
 }
 
 def off() {
@@ -219,13 +244,38 @@ def eco() {
 }
 
 def cool() {
-	logDebug "cool unavailable calling eco"
+    log.info "cool mode is not available for this device. => Defaulting to eco mode instead."
     eco()
 }
 
+def auto() {
+    log.info "auto mode is not available for this device. => Defaulting to heat mode instead."
+    heat()
+}
+
 def emergencyHeat() {
-	logDebug "emergencyHeat unavailable calling heat"
+    log.info "emergencyHeat mode is not available for this device. => Defaulting to heat mode instead."
 	heat()
+}
+
+def fanAuto() {
+    log.info "fanAuto mode is not available for this device"
+}
+
+def fanCirculate(){
+    log.info "fanCirculate mode is not available for this device"
+}
+
+def fanOn(){
+    log.info "fanOn mode is not available for this device"
+}
+
+def setSchedule(JSON_OBJECT){
+    log.info "setSchedule is not available for this device"
+}
+
+def setThermostatFanMode(fanmode){
+    log.info "setThermostatFanMode is not available for this device"
 }
 
 def setHeatingSetpoint(preciseDegrees) {
@@ -235,11 +285,15 @@ def setHeatingSetpoint(preciseDegrees) {
         
 		logDebug "setHeatingSetpoint(${degrees} ${temperatureScale})"
         
-        def celsius = (getTemperatureScale() == "C") ? degrees as Float : (fahrenheitToCelsius(degrees) as Float).round(2)
+        def celsius = (temperatureScale == "C") ? degrees as Float : (fahrenheitToCelsius(degrees) as Float).round(2)
         int celsius100 = Math.round(celsius * 100)
         
         zigbee.writeAttribute(0x201, 0x0012, 0x29, celsius100) //Write Heat Setpoint      
 	}
+}
+
+def setCoolingSetpoint(degrees) {
+    log.info "setCoolingSetpoint is not available for this device"
 }
 
 def setThermostatMode(String value) {
