@@ -115,25 +115,6 @@ def parse(String description) {
             }
             sendEvent(name:"thermostatOperatingState", value:map.value)
         }
-        else if (descMap.cluster == "0204" & descMap.attrId == "0000") {
-        	logDebug "TEMPERATURE DISPLAY MODE"
-            map.name = "temperatureScale"
-            if (descMap.value == "00") {		//Celsius
-                map.value = "C"
-            }
-            else if (descMap.value == "01") {	//Fahrenheit
-                map.value = "F"
-            }
-            
-            if (getTemperatureScale() != map.Value){
-                // The temperature scale changed. Adjust the dummy cooling setpoint to the right scale
-                sendEvent(name: "coolingSetpoint", value:getTemperature("0BB8")) // 0x0BB8 =  30 Celsius
-            }            
-            
-            updateDataValue("temperatureScale", map.value)
-            // Don't create an event -> reset the map to null
-            map = null
-        }
 	}
 
 	def result = null
@@ -217,7 +198,7 @@ def getTemperature(value) {
 }
 
 def getTemperatureScale() {
-    return getDataValue("temperatureScale")
+    return "${location.temperatureScale}"
 }
 
 def off() {
